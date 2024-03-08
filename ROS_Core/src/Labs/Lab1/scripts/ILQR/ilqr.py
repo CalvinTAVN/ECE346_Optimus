@@ -130,6 +130,96 @@ class ILQR():
 		obs_refs = self.collision_checker.check_collisions(trajectory, self.obstacle_list)
 		return path_refs, obs_refs
 
+    ###############################################
+    #Student Definition
+    def non_linear_dynamics_step(xt, ut, dt, L):
+        #xt will be 6d vector which will be [X, Y, V, phi, delta]
+        #ut = 2d vector of contrl [a, omega]
+        #dt timestep
+        x_dot = xt[2] * np.cos(xt[3])
+        y_dot = xt[2] * np.sin(xt[3])
+        v_dot = ut[0]
+        phi_dot = (xt[3] / L) * np.tan(xt[4])
+        delta_dot = u[1]
+        
+        XDot = np.array([x_dot, y_dot, v_dot, phi_dot, delta_dot])
+        return xt + xDot*dt
+        
+        
+        
+    
+    def backward_pass(x_trajectory: np.ndarray, controls: np.ndarray, path_refs, obs_refs, reg = 1):
+        #first compute Q_t which should be the Hessian of the cost
+        q, r, Q, R, H = self.cost.get_derivatives_np(x_trajectory, controls, path_refs, obs_refs)
+        A, B = self.dyn.get_jacobian_np(x_trajectory, controls) 
+        T = X.shape[1]
+        k_open_loop = np.zeros((2, T))
+        #2 control inputs, 5 state variables
+        k_closed_loop = np.zeros((2, 5, T))
+        
+        #derivative of value function at final Step
+        P = q[:, T-1]
+        p = Q[:, :, T-1] 
+        t = T-2
+        
+        while t>=0:
+            Q_x = q[:,t] + A[:,:,t].T @ p
+            Q_u = r[:,t] + B[:,:,t].T @ p
+            Q_xx = Q[:,:,t] + A[:,:,t].T @ P @ A[:,:,t]
+            Q_uu = R[:,:,t] + B[:,:,t].T @ P @ B[:,:,t]
+            Q_ux = H[:,:,t] + B[:,:,t].T @ P @ A[:,:,t]
+
+            # Add regularization
+            reg_matrix = reg*np.eye(5)
+            Q_uu_reg = R[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ B[:,:,t]
+            Q_ux_reg = H[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ A[:,:,t]
+
+            # check if Q_uu_reg is PD
+            if not np.alls(np.linalg.eigvals(Q_uu_reg) > 0) and reg < 1e5:
+                reg *= 5
+                t = T-2
+                p = q[:,T-1]
+                P = Q[:,:,T-1]
+                continue
+
+            Q_uu_reg_inv = np.linalg.inv(Q_uu_reg)
+            # Calculate policy
+            k = -Q_uu_reg_inv@Q_u
+            K = -Q_uu_reg_inv@Q_ux_reg
+            k_open_loop[:,t] = k
+            K_closed_loop[:, :, t] = K
+
+            # Update value function derivative for the previous time step
+            p = Q_x + K.T @ Q_uu @ k + K.T@Q_u + Q_ux.T@k
+            P = Q_xx + K.T @ Q_uu @ K + K.T@Q_ux + Q_ux.T@K
+            t -= 1
+        reg = max(1e-5, reg*0.5)
+        return K_closed_loop, k_open_loop, reg
+
+    def forward_pass(X_0, U_0, K_closed_loop, k_open_loop, J, alpha = 1, dt, length, path_refs, obs_refs):
+        X = np.zeros_like(X_0)
+        U = np.zeros_like(U_0)
+        
+        X[:, 0] = X_0[:, 0] #sets the initial state X to be initial state X_0
+        T = X_0.shape[1]
+        rho = 0.1
+        epsilon = 0.001
+        
+        while alpha > rho:
+            for t in range(T-1):
+                K = K_closed_loop[:,: t]
+                k = k_open_loop[:, t]
+                U[:, t] = U_0[:,t] + K @ (X[:, t] - X_0[:, t])  alpha*k
+                #Length TBD
+                X[:,t + 1] = non_linear_dynamics_step(X[:,t], U[:,t], dt, length)
+            cur_J = self.cost.get_traj_cost(X, U, path_refs, obs_refs)
+            if cur_J < J: break
+            else: alpha = alpha * epsilon
+        return X, U, cur_J
+
+        
+    ###############################################
+    
 	def plan(self, init_state: np.ndarray,
 				controls: Optional[np.ndarray] = None) -> Dict:
 		'''
@@ -229,7 +319,23 @@ class ILQR():
         #   Q: np.ndarray, (dim_x, dim_u, T) hessian of cost function w.r.t. states
         #   R: np.ndarray, (dim_u, dim_u, T) hessian of cost function w.r.t. controls
         #   H: np.ndarray, (dim_x, dim_u, T) hessian of cost function w.r.t. states and controls
-		
+		reg = self.reg_init  #regularization step
+        cur_J = 0
+        converged = 0.01
+        K_t = 0
+        k_t = 0
+        steps = 0
+        status = 0
+        while J - cur_J > converged:
+            K_t, k_t, reg = backward_pass(trajectory, controls, path_refs, obs_refs, reg)
+            J = cur_J
+            trajectory, controls, cur_J = forward_pass(X_0, U_0, K_closed_loop, k_open_loop, J, alpha = 1, dt, length= self.length, path_refs, obs_refs)
+            steps += 1
+            if steps > self.max_iter:
+                status = -1
+                break
+        
+        
 		########################### #END of TODO 1 #####################################
 
 		t_process = time.time() - t_start
@@ -238,8 +344,8 @@ class ILQR():
 				trajectory = trajectory,
 				controls = controls,
 				status=None, #	TODO: Fill this in
-				K_closed_loop=None, # TODO: Fill this in
-				k_open_loop=None # TODO: Fill this in
+				K_closed_loop=K_t, # TODO: Fill this in
+				k_open_loop=k_t # TODO: Fill this in
 				# Optional TODO: Fill in other information you want to return
 		)
 		return solver_info
