@@ -33,7 +33,7 @@
         <param name="traj_topic"           value="$(arg traj_topic)" />
         <param name="path_topic"           value="$(arg path_topic)" />
         <param name="package_path"         value="$(find racecar_planner)" />
-        <param name="simulation"           value="True" />
+        <param name="simulation"           value="true" />
         <param name="receding_horizon"     value="$(arg receding_horizon)" />
         <param name="replan_dt"            value="$(arg replan_dt)" />
         <param name="ilqr_params_file"     value="$(arg ilqr_config)" />

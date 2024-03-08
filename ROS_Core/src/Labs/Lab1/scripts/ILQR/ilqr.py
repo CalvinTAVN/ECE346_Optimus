@@ -61,7 +61,6 @@ class ILQR():
                         self.config.line_search_b,
                         self.config.line_search_c)
                     )
-
 		print('Line Search Alphas: ', self.alphas)
 
 		# regularization parameters
@@ -145,21 +144,23 @@ class ILQR():
 		xDot = np.array([x_dot, y_dot, v_dot, phi_dot, delta_dot])
 		return xt + xDot*dt
 	   
-	def backward_pass(self, x_trajectory: np.ndarray, controls: np.ndarray, path_refs, obs_refs, reg = 1):
+	def backward_pass(self, trajectory: np.ndarray, controls: np.ndarray, reg):
         #first compute Q_t which should be the Hessian of the cost
-		q, r, Q, R, H = self.cost.get_derivatives_np(x_trajectory, controls, path_refs, obs_refs)
-		A, B = self.dyn.get_jacobian_np(x_trajectory, controls) 
-		T = x_trajectory.shape[1]
-		k_open_loop = np.zeros((2, T))
+		path_refs, obs_refs = self.get_references(trajectory)
+		q, r, Q, R, H = self.cost.get_derivatives_np(trajectory, controls, path_refs, obs_refs)
+		k_open_loop = np.zeros((self.dim_u, self.T))
 		#2 control inputs, 5 state variables
-		K_closed_loop = np.zeros((2, 5, T))
+		K_closed_loop = np.zeros((self.dim_u, self.dim_x, self.T))
 
 		#derivative of value function at final Step
-		p = q[:, T-1]
-		P = Q[:, :, T-1] 
-		t = T-2
+		p = q[:, self.T-1]
+		P = Q[:, :, self.T-1] 
+		t = self.T-1
 
 		while t>=0:
+			path_refs, obs_refs = self.get_references(trajectory)
+			q, r, Q, R, H = self.cost.get_derivatives_np(trajectory, controls, path_refs, obs_refs)
+			A, B = self.dyn.get_jacobian_np(trajectory, controls) 
 			Q_x = q[:,t] + A[:,:,t].T @ p
 			Q_u = r[:,t] + B[:,:,t].T @ p
 			Q_xx = Q[:,:,t] + A[:,:,t].T @ P @ A[:,:,t]
@@ -167,16 +168,16 @@ class ILQR():
 			Q_ux = H[:,:,t] + B[:,:,t].T @ P @ A[:,:,t]
 
 			# Add regularization
-			reg_matrix = reg*np.eye(5)
+			reg_matrix = reg*np.eye(self.dim_x)
 			Q_uu_reg = R[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ B[:,:,t]
 			Q_ux_reg = H[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ A[:,:,t]
 		
 			# check if Q_uu_reg is PD
-			if not np.all(np.linalg.eigvals(Q_uu_reg) > 0) and reg < 1e5:
-				reg *= 5
-				t = T-2
-				p = q[:,T-1]
-				P = Q[:,:,T-1]
+			if not np.all(np.linalg.eigvals(Q_uu_reg) > 0):
+				reg *= self.reg_scale_up
+				t = self.T-1
+				p = q[:,self.T-1]
+				P = Q[:,:,self.T-1]
 				continue
 
 			Q_uu_reg_inv = np.linalg.inv(Q_uu_reg)
@@ -190,20 +191,20 @@ class ILQR():
 			p = Q_x + K.T @ Q_uu @ k + K.T@Q_u + Q_ux.T@k
 			P = Q_xx + K.T @ Q_uu @ K + K.T@Q_ux + Q_ux.T@K
 			t -= 1
-		reg = max(1e-5, reg*0.5)
+		reg = max(self.reg_min, reg/self.reg_scale_down)
 		return K_closed_loop, k_open_loop, reg
 
-	def forward_pass(self, X_0, U_0, K_closed_loop, k_open_loop, J, path_refs, obs_refs, alpha):
+	def forward_pass(self, X_0, U_0, K_closed_loop, k_open_loop, alpha):
 		X = np.zeros_like(X_0)
 		U = np.zeros_like(U_0)
 
 		X[:, 0] = X_0[:, 0] #sets the initial state X to be initial state X_0
-		T = X_0.shape[1]
-		for t in range(T-1):
+		for t in range(self.T-1):
 			K = K_closed_loop[:,:,t]
 			k = k_open_loop[:, t]
 			U[:, t] = U_0[:,t] + K @ (X[:, t] - X_0[:, t]) + alpha*k
-			X[:,t + 1], U[:, t] = self.dyn.integrate_forward_np(X[:,t], U[:,t])
+			X[:,t + 1],U[:,t] = self.dyn.integrate_forward_np(X[:,t], U[:,t])
+		path_refs, obs_refs = self.get_references(X)
 		cur_J = self.cost.get_traj_cost(X, U, path_refs, obs_refs)
 		return X, U, cur_J
 
@@ -229,19 +230,20 @@ class ILQR():
 
 		# We first check if the planner is ready
 		if self.ref_path is None:
-			print('No reference path is provided.')
+			#print('No reference path is provided.')
 			return dict(status=-1)
 
 		# if no initial control sequence is provided, we assume it is all zeros.
 		if controls is None:
 			controls =np.zeros((self.dim_u, self.T))
+			#print(controls)
 		else:
 			assert controls.shape[1] == self.T
 
 		# Start timing
 		t_start = time.time()
 
-		# Rolls out the nominal trajectory and gets the initial cost.
+		# Roll"s out the nominal trajectory and gets the initial cost.
 		trajectory, controls = self.dyn.rollout_nominal_np(init_state, controls)
 
 		# Get path and obstacle references based on your current nominal trajectory.
@@ -310,19 +312,14 @@ class ILQR():
         #   R: np.ndarray, (dim_u, dim_u, T) hessian of cost function w.r.t. controls
         #   H: np.ndarray, (dim_x, dim_u, T) hessian of cost function w.r.t. states and controls
 		reg = self.reg_init  #regularization step
-		cur_J = 0
-		K_t = 0
-		k_t = 0
 		status = 0
 		converged = False
 		for i in range(self.max_iter):
-			path_refs, obs_refs = self.get_references(trajectory)
-			K_t, k_t, reg = self.backward_pass(trajectory, controls, path_refs, obs_refs, reg)
+			K_t, k_t, reg = self.backward_pass(trajectory, controls, reg)
 			changed = False
-			for j in range(4):
-				alpha = self.alphas[j]
-				trajectory_new, controls_new, cur_J = self.forward_pass(trajectory, controls, K_t, k_t, J, path_refs, obs_refs, alpha)
-				if cur_J<=J:
+			for alpha in self.alphas:
+				trajectory_new, controls_new, cur_J = self.forward_pass(trajectory, controls, K_t, k_t, alpha)
+				if cur_J<J:
 					if np.abs(J - cur_J) < self.tol:
 						converged = True
 					J = cur_J
@@ -332,9 +329,9 @@ class ILQR():
 					break
 			if not changed:
 				print("line search failed with reg = ", reg, " at step ", i)
-				status = -1
 				break
 			if converged:
+				status = 1
 				print("converged after ", i, " steps.")
 				break
 		########################### #END of TODO 1 #####################################

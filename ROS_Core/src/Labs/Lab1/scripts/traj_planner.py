@@ -216,9 +216,17 @@ class TrajectoryPlanner():
         # Implement your control law here using ILQR policy
         # Hint: make sure that the difference in heading is between [-pi, pi]
         
-        accel = 0 # TO BE REPLACED
-        steer_rate = 0 # TO BE REPLACED
+        #note heading angle is phi
+        #check if the diference in heading angle is between -pi and pi
+        headingMatrix = (x - x_ref)
+        while headingMatrix[3] < -np.pi:
+            headingMatrix[3] = headingMatrix[3] + 2 * np.pi
+        while headingMatrix[3] > np.pi:
+            headingMatrix[3] = headingMatrix[3] - 2 * np.pi
+        u_new = u_ref + K_closed_loop @ headingMatrix
 
+        accel = u_new[0]  # TO BE REPLACED
+        steer_rate = u_new[1] # TO BE REPLACED
         ##### END OF TODO ##############
 
         return accel, steer_rate
@@ -381,7 +389,7 @@ class TrajectoryPlanner():
                 # stop when the progress is not increasing
                 while (progress - prev_progress)*new_path.length > 1e-3: # stop when the progress is not increasing
                     nominal_trajectory.append(state)
-                    new_plan = self.planner.plan(state, None, verbose=False)
+                    new_plan = self.planner.plan(state, None)
                     nominal_controls.append(new_plan['controls'][:,0])
                     K_closed_loop.append(new_plan['K_closed_loop'][:,:,0])
                     
@@ -449,6 +457,29 @@ class TrajectoryPlanner():
                 - Publish the new policy for RVIZ visualization
                     for example: self.trajectory_pub.publish(new_policy.to_msg())       
             '''
+            if self.plan_state_buffer.new_data_available and t_last_replan > self.replan_dt and self.planner_ready:
+                
+                current_state = self.plan_state_buffer.readFromRT()[:-1]
+                prev_policy = self.policy_buffer.readFromRT()
+                initial_control = None
+                if prev_policy is not None:
+                    initial_control = prev_policy.get_ref_controls(rospy.get_rostime().to_sec())
+                if self.path_buffer.new_data_available:
+                    self.planner.update_ref_path(self.path_buffer.readFromRT())
+                replan = self.planner.plan(current_state, initial_control)
+                t_last_replan = 0
+
+                if (replan["status"] == 1):
+                    new_policy = Policy(X = replan["trajectory"], 
+                                    U = replan["controls"],
+                                    K = replan["K_closed_loop"], 
+                                    t0 = rospy.get_rostime().to_sec(), 
+                                    dt = self.planner.dt,
+                                    T = replan["trajectory"].shape[-1])
+                    self.policy_buffer.writeFromNonRT(new_policy)
+                    self.trajectory_pub.publish(new_policy.to_msg())
+
+            t_last_replan+=0.01
             ###############################
             #### END OF TODO #############
             ###############################
