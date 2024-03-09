@@ -319,7 +319,7 @@ class ILQR():
 			changed = False
 			for alpha in self.alphas:
 				trajectory_new, controls_new, cur_J = self.forward_pass(trajectory, controls, K_t, k_t, alpha)
-				if cur_J<J:
+				if cur_J < J:
 					if np.abs(J - cur_J) < self.tol:
 						converged = True
 					J = cur_J

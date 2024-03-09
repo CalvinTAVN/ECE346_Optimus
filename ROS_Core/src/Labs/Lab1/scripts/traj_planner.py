@@ -463,7 +463,7 @@ class TrajectoryPlanner():
                 prev_policy = self.policy_buffer.readFromRT()
                 initial_control = None
                 if prev_policy is not None:
-                    initial_control = prev_policy.get_ref_controls(rospy.get_rostime().to_sec())
+                    initial_control = prev_policy.get_ref_controls(prev_policy.t0)
                 if self.path_buffer.new_data_available:
                     self.planner.update_ref_path(self.path_buffer.readFromRT())
                 replan = self.planner.plan(current_state, initial_control)
@@ -473,7 +473,7 @@ class TrajectoryPlanner():
                     new_policy = Policy(X = replan["trajectory"], 
                                     U = replan["controls"],
                                     K = replan["K_closed_loop"], 
-                                    t0 = rospy.get_rostime().to_sec(), 
+                                    t0= rospy.get_rostime().to_sec(), 
                                     dt = self.planner.dt,
                                     T = replan["trajectory"].shape[-1])
                     self.policy_buffer.writeFromNonRT(new_policy)
