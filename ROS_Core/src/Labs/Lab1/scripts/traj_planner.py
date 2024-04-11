@@ -46,21 +46,29 @@ class TrajectoryPlanner():
         self.pwm_converter = GeneratePwm()
         
         # set up the optimal control solver
+        print("1")
         self.setup_planner()
         
+        print("2")
         self.setup_publisher()
         
+        print("3")
         self.setup_subscriber()
 
+        print("4")
         self.setup_service()
 
         #ROS Service Client
+        print("5")
         rospy.wait_for_service('obstacles/get_frs')
-        get_frs_client = rospy.serviceProxy('obstacles/get_frs', GetFRS)
+        try:
+            self.get_frs_client = rospy.ServiceProxy('obstacles/get_frs', GetFRS)
+        except rospy.ServiceException as e:
+            print("Service call failed: %s"%e)
 
         #create publisher for get_frs
         self.frs_pub = rospy.Publisher('/vis/FRS', MarkerArray, queue_size=1)
-
+        
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
         if not self.receding_horizon:
@@ -80,7 +88,7 @@ class TrajectoryPlanner():
         # Read ROS topic names to subscribe 
         self.odom_topic = get_ros_param('~odom_topic', '/slam_pose')
         self.path_topic = get_ros_param('~path_topic', '/Routing/Path')
-        self.obstacle_topic = get_ros_param('∼static obs topic', '/Obstacles/Static') #lab2 task 1
+        self.obstacle_topic = get_ros_param('∼static_obs_topic', '/Obstacles/Static') #lab2 task 1
         
         # Read ROS topic names to publish
         self.control_topic = get_ros_param('~control_topic', '/control/servo_control')
@@ -112,6 +120,7 @@ class TrajectoryPlanner():
         # Initialize ILQR solver
 
         self.planner = ILQR(self.ilqr_params_abs_path)
+        print("settingup ILQR planner")
 
         # create buffers to handle multi-threading
         self.plan_state_buffer = RealtimeBuffer()
@@ -382,6 +391,7 @@ class TrajectoryPlanner():
         We plan entire trajectory (policy) everytime when a new reference path is available
         '''
         rospy.loginfo('Policy Planning thread started waiting for ROS service calls...')
+        print("conducting policy planning thread")
         while not rospy.is_shutdown():
             # determine if we need to replan
             if self.path_buffer.new_data_available and self.planner_ready:
@@ -487,7 +497,7 @@ class TrajectoryPlanner():
                     self.planner.update_ref_path(self.path_buffer.readFromRT())
                 ##############################################
                 #lab2
-
+                
                 #call service client for FRS
                 request = rospy.get_rostime().to_sec() + np.arange(self.planner.T) * self.planner.dt
                 response = self.get_frs_client(request)
@@ -499,12 +509,13 @@ class TrajectoryPlanner():
 
                 #extend obstacles
                 obstacle_list.extend(new_obstacles)
-
-                self.planner.update_obstacles(obstacle_list)
-
                 frs_msg = frs_to_msg(response)
                 self.frs_pub.publish(frs_msg)
 
+                self.planner.update_obstacles(obstacle_list)
+
+                
+                
                 ###########################################
                 replan = self.planner.plan(current_state, initial_control)
                 t_last_replan = 0

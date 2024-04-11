@@ -46,7 +46,7 @@ class DynObstacle():
         # Hint: You can find <OdometryArray> message 
         #    <ROS_Core/src/Utility/Custom_Msgs/msg/OdometryArray.msg>
         #self.other_poses.sub = rospy.Subscriber(self.dyn_obs_topic, OdometryArray, self.other_poses_callback)
-        rospy.Subscriber(self.dyn_obs_topic, OdometryArray, self.other_poses_callback)
+        self.other_poses_sub = rospy.Subscriber(self.dyn_obs_topic, OdometryArray, self.other_poses_callback, queue_size = 10)
 
         ###############################################
         # Class variable to store the most recent dynamic obstacle's poses
@@ -96,7 +96,7 @@ class DynObstacle():
         # http://wiki.ros.org/ROS/Tutorials/WritingServiceClient%28python%29
         ###############################################
     def other_poses_callback(self, other_odom_msg):
-        self.dyn_obstacles.append(other_odom_msg.odom_list)
+        self.dyn_obstacles = other_odom_msg.odom_list
 
 
     def dynamic_reconfigure_callback(self, config, level):
@@ -106,6 +106,7 @@ class DynObstacle():
         self.dx = config['dx']
         self.dy = config['dy']
         self.allow_lane_change = config['allow_lane_change']
+        return config
 
     def srv_cb(self, req):
         '''
@@ -126,8 +127,7 @@ if __name__ == '__main__':
     ##########################################
     #TODO: Initialize a ROS Node with a DynObstacle object
     ##########################################
-    dyn_obstacle = DynObstacle()
+    rospy.init_node('dyn_obs')
+    rospy.loginfo("start dyn_obs NODE")
+    dyn_obj = DynObstacle()
     rospy.spin()
-    
-
-    
