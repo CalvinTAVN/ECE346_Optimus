@@ -255,6 +255,7 @@ class TrajectoryPlanner():
 
         accel = u_new[0]  # TO BE REPLACED
         steer_rate = u_new[1] # TO BE REPLACED
+        #test
         ##### END OF TODO ##############
 
         return accel, steer_rate
