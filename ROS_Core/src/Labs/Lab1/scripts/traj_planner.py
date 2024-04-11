@@ -30,9 +30,13 @@ class TrajectoryPlanner():
     '''
     Main class for the Receding Horizon trajectory planner
     '''
+    #initialize objects list
+    static_obstacle_dict = {}#task 3
+
 
     def __init__(self):
         # Indicate if the planner is used to generate a new trajectory
+        #print("initialize trajectory planner")
         self.update_lock = threading.Lock()
         self.latency = 0.0
         
@@ -49,6 +53,13 @@ class TrajectoryPlanner():
         self.setup_subscriber()
 
         self.setup_service()
+
+        #ROS Service Client
+        rospy.wait_for_service('obstacles/get_frs')
+        get_frs_client = rospy.serviceProxy('obstacles/get_frs', GetFRS)
+
+        #create publisher for get_frs
+        self.frs_pub = rospy.Publisher('/vis/FRS', MarkerArray, queue_size=1)
 
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
@@ -69,11 +80,12 @@ class TrajectoryPlanner():
         # Read ROS topic names to subscribe 
         self.odom_topic = get_ros_param('~odom_topic', '/slam_pose')
         self.path_topic = get_ros_param('~path_topic', '/Routing/Path')
-        
+        self.obstacle_topic = get_ros_param('∼static obs topic', '/Obstacles/Static') #lab2 task 1
         
         # Read ROS topic names to publish
         self.control_topic = get_ros_param('~control_topic', '/control/servo_control')
         self.traj_topic = get_ros_param('~traj_topic', '/Planning/Trajectory')
+        
         
         # Read the simulation flag, 
         # if the flag is true, we are in simulation 
@@ -98,6 +110,7 @@ class TrajectoryPlanner():
         This function setup the ILQR solver
         '''
         # Initialize ILQR solver
+
         self.planner = ILQR(self.ilqr_params_abs_path)
 
         # create buffers to handle multi-threading
@@ -124,6 +137,7 @@ class TrajectoryPlanner():
         '''
         self.pose_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback, queue_size=10)
         self.path_sub = rospy.Subscriber(self.path_topic, PathMsg, self.path_callback, queue_size=10)
+        self.obs_sub = rospy.Subscriber(self.obstacle_topic, MarkerArray, self.obstacle_callback) #task 2
 
     def setup_service(self):
         '''
@@ -192,6 +206,11 @@ class TrajectoryPlanner():
             rospy.loginfo('Path received!')
         except:
             rospy.logwarn('Invalid path received! Move your robot and retry!')
+    
+    def obstacle_callback(self, obstacle_msg):
+        for marker in obstacle_msg.markers:
+            id_obstacle, vertex =get_obstacle_vertices(marker)
+            self.static_obstacle_dict[id_obstacle] = vertex
 
     @staticmethod
     def compute_control(x, x_ref, u_ref, K_closed_loop):
@@ -466,9 +485,30 @@ class TrajectoryPlanner():
                     initial_control = prev_policy.get_ref_controls(prev_policy.t0)
                 if self.path_buffer.new_data_available:
                     self.planner.update_ref_path(self.path_buffer.readFromRT())
+                ##############################################
+                #lab2
+
+                #call service client for FRS
+                request = rospy.get_rostime().to_sec() + np.arange(self.planner.T) * self.planner.dt
+                response = self.get_frs_client(request)
+                new_obstacles = frs_to_obstacle(response)
+
+                obstacle_list = []
+                for key in self.static_obstacle_dict.keys():
+                    obstacle_list.append(self.static_obstacle_dict[key])
+
+                #extend obstacles
+                obstacle_list.extend(new_obstacles)
+
+                self.planner.update_obstacles(obstacle_list)
+
+                frs_msg = frs_to_msg(response)
+                self.frs_pub.publish(frs_msg)
+
+                ###########################################
                 replan = self.planner.plan(current_state, initial_control)
                 t_last_replan = 0
-
+                
                 if (replan["status"] == 1):
                     new_policy = Policy(X = replan["trajectory"], 
                                     U = replan["controls"],
