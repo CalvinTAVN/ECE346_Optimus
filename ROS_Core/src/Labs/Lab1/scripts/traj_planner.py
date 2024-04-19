@@ -15,7 +15,7 @@ from racecar_msgs.msg import ServoMsg
 from racecar_planner.cfg import plannerConfig
 
 from dynamic_reconfigure.server import Server
-from tf.transformations import euler_from_quaternion
+from tf.transformations import euler_from_quatmernion
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path as PathMsg # used to display the trajectory on RVIZ
 from std_srvs.srv import Empty, EmptyResponse
