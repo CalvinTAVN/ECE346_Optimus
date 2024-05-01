@@ -49,19 +49,19 @@ class Config():
         self.length = 0.40 # length of the vehicle
         
         # steering angle limits
-        self.delta_max = 0.35 # maximum steering angle
+        self.delta_max = 0.35 # maximum steering angle #originally 0.35 to -0.35
         self.delta_min = -0.35 # minimum steering angle
         
         # velocity limits
-        self.v_max = 5.0 # maximum velocity
+        self.v_max = 5.0 # maximum velocity #originally 5
         self.v_min = 0.0 # minimum velocity
         
         # turn rate limits
-        self.omega_min = -6.0 # minimum turn rate
+        self.omega_min = -6.0 # minimum turn rate 
         self.omega_max = 6.0 # maximum turn rate
         
         # acceleration limits
-        self.a_max = 5.0 # maximum acceleration
+        self.a_max = 5.0 # maximum acceleration #originally 5.0
         self.a_min = -5.0 # minimum acceleration
         
         # reference velocity
