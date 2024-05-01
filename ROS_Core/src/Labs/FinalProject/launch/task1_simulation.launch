@@ -15,7 +15,7 @@
     <arg name="static_obs_topic"    default="/Obstacles/Static"     doc="ROS topic for static obstacles"/>
     <arg name="dyn_obs_topic"       default="/Obstacles/Dynamic"    doc="ROS topic for dynamic obstacles"/>
     
-    <rosparam file="$(find final_project)/task1.yaml" command="load" />
+    <rosparam file="$(find final_project)/configstask1.yaml" command="load" />
 
     <node pkg="racecar_interface" type="simulation_node.py" name="simulation_node" output="$(arg output)">
         <param name="odom_topic"           value="$(arg odom_topic)" />
@@ -57,5 +57,20 @@
     
     <node type="rqt_gui" name="rqt_gui" pkg="rqt_gui" 
         args="--perspective-file $(find racecar_interface)/rviz/rqt_sim.perspective"/>
+    
+    <!-- node is the trajectory planner-->
+    <node pkg="racecar_planner" type="final_trajectory_planner_node.py" name="final_traj_planning" output="$(arg output)">
+        <param name="odom_topic"           value="$(arg odom_topic)" />
+        <param name="control_topic"        value="$(arg control_topic)" />
+        <param name="obstacle_topic"       value="$(arg obstacle_topic)" />
+        <param name="traj_topic"           value="$(arg traj_topic)" />
+        <param name="path_topic"           value="$(arg path_topic)" />
+        <param name="package_path"         value="$(find racecar_planner)" />
+        <param name="simulation"           value="True" />
+        <param name="receding_horizon"     value="$(arg receding_horizon)" />
+        <param name="replan_dt"            value="$(arg replan_dt)" />
+        <param name="ilqr_params_file"     value="$(arg ilqr_config)" />
+        <param name="PWM_model"            value="$(find racecar_planner)/configs/mlp_model.sav" />
+    </node>
     
 </launch>
